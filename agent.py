@@ -30,9 +30,10 @@ if "vector_store" not in st.session_state:
 # =========================
 # LLM + PROMPT
 # =========================
+API_KEY = st.secrets.get("API_KEY") or os.getenv("API_KEY")
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
-    google_api_key=os.getenv("API_KEY"),
+      google_api_key=API_KEY,
 )
 prompt = hub.pull("hwchase17/react")
 
