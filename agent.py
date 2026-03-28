@@ -88,7 +88,6 @@ with st.sidebar:
                 google_api_key=API_KEY
             )
 
-            # ✅ NO persistence (cloud-safe)
             st.session_state.vector_store = Chroma.from_documents(
                 docs,
                 embedding_model
@@ -105,15 +104,18 @@ def search_pdf(query):
     retriever = st.session_state.vector_store.as_retriever(search_kwargs={"k": 3})
     docs = retriever.invoke(query)
     if not docs:
-        return "No relevant info found."
-    return "\n\n".join(
-        [f"{doc.page_content}" for doc in docs]
-    )
+        return "No relevant info found in PDF."
+    return "\n\n".join([doc.page_content for doc in docs])
 
 pdf_tool = Tool(
     name="PDF Knowledge Base",
     func=search_pdf,
-    description="Answer questions from uploaded PDFs."
+    description="""
+Use this tool FIRST whenever the question is about the user,
+their resume, experience, education, skills, or personal info.
+
+Always prioritize this tool over web search for personal queries.
+"""
 )
 
 def web_search(query):
@@ -126,7 +128,10 @@ def web_search(query):
 web_tool = Tool(
     name="Web Search",
     func=web_search,
-    description="Useful for general knowledge questions."
+    description="""
+Use this only for general knowledge questions NOT related to uploaded PDFs.
+Do NOT use this for personal or resume-related queries.
+"""
 )
 
 # =========================
@@ -143,11 +148,15 @@ agent_executor = initialize_agent(
 )
 
 # =========================
-# ROUTING (IMPORTANT 🔥)
+# ROUTING LOGIC 🔥
 # =========================
 def is_simple_chat(query):
     casual = ["hi", "hello", "how are you", "who are you"]
     return any(word in query.lower() for word in casual)
+
+def is_resume_query(query):
+    keywords = ["my", "resume", "experience", "skills", "education", "who am i"]
+    return any(word in query.lower() for word in keywords)
 
 # =========================
 # MAIN UI
@@ -171,16 +180,20 @@ if question := st.chat_input("Ask something..."):
         with st.spinner("Thinking..."):
 
             try:
-                # 🔥 ROUTING
                 if is_simple_chat(question):
                     response = llm.invoke(question)
                     answer = response.content
+
+                elif is_resume_query(question):
+                    # 🔥 FORCE PDF usage
+                    answer = search_pdf(question)
+
                 else:
                     response = agent_executor.invoke({"input": question})
                     answer = response.get("output", str(response))
 
             except Exception:
-                # fallback
+                # fallback to LLM
                 response = llm.invoke(question)
                 answer = response.content
 
