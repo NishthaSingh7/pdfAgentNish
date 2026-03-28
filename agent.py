@@ -70,9 +70,12 @@ def load_llm():
         from langchain_google_genai import ChatGoogleGenerativeAI
         API_KEY = st.secrets.get("API_KEY") or os.getenv("API_KEY")
         return ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash-latest",  # 🔥 faster
-            google_api_key=API_KEY
-        )
+    model="gemini-1.5-flash",
+    google_api_key=API_KEY,
+    temperature=0.2,
+    max_output_tokens=200,
+    top_n=2
+)
 
 llm = load_llm()
 
