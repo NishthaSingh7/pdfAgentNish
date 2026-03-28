@@ -1,7 +1,8 @@
 # =========================
-# CONFIG
+# CONFIG 🔥
 # =========================
-USE_LOCAL = True   # True → Ollama | False → Gemini
+USE_LOCAL = True   # True → Local (Ollama + FAISS)
+                  # False → Cloud (Gemini + Chroma)
 
 # =========================
 # IMPORTS
@@ -16,51 +17,36 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
-import faiss
+
+# conditional import
+if USE_LOCAL:
+    import faiss
+else:
+    from langchain_community.vectorstores import Chroma
 
 load_dotenv()
 
 # =========================
-# PAGE CONFIG 🔥
+# PAGE CONFIG 💎
 # =========================
-st.set_page_config(
-    page_title="AI PDF Assistant",
-    page_icon="🤖",
-    layout="wide"
-)
+st.set_page_config(page_title="AI PDF Assistant", page_icon="🤖", layout="wide")
 
 # =========================
-# CUSTOM CSS 💎
+# CSS 💎
 # =========================
 st.markdown("""
 <style>
-.main {
-    background-color: #0E1117;
-}
-.block-container {
-    padding-top: 2rem;
-}
-.stChatMessage {
-    border-radius: 12px;
-    padding: 10px;
-}
+.main { background-color: #0E1117; }
+.stChatMessage { border-radius: 12px; padding: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
 # =========================
 # SESSION STATE
 # =========================
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-if "index" not in st.session_state:
-    st.session_state.index = None
-
-if "documents" not in st.session_state:
-    st.session_state.documents = []
-
-if "bm25" not in st.session_state:
-    st.session_state.bm25 = None
+for key in ["messages", "documents", "bm25", "index", "vector_store"]:
+    if key not in st.session_state:
+        st.session_state[key] = None if key != "messages" else []
 
 # =========================
 # LLM LOADER
@@ -72,30 +58,26 @@ def load_llm():
         return ChatOllama(model="llama3", temperature=0)
     else:
         from langchain_google_genai import ChatGoogleGenerativeAI
-        try:
-            API_KEY = st.secrets["API_KEY"]
-        except:
-            API_KEY = os.getenv("API_KEY")
-
+        API_KEY = st.secrets.get("API_KEY") or os.getenv("API_KEY")
         return ChatGoogleGenerativeAI(
             model="gemini-1.5-flash",
-            google_api_key=API_KEY,
+            google_api_key=API_KEY
         )
 
 llm = load_llm()
 
 # =========================
-# LOCAL MODELS
+# MODELS (LOCAL ONLY)
 # =========================
 @st.cache_resource
-def load_embedding_model():
+def load_embedding():
     return SentenceTransformer("all-MiniLM-L6-v2")
 
 @st.cache_resource
 def load_reranker():
     return CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 
-embedding_model = load_embedding_model()
+embedding_model = load_embedding()
 reranker = load_reranker()
 
 # =========================
@@ -103,7 +85,7 @@ reranker = load_reranker()
 # =========================
 def vector_search(query, k=5):
     query_vec = embedding_model.encode([query])
-    distances, indices = st.session_state.index.search(query_vec, k)
+    _, indices = st.session_state.index.search(query_vec, k)
     return [st.session_state.documents[i] for i in indices[0]]
 
 def hybrid_search(query):
@@ -120,7 +102,6 @@ def hybrid_search(query):
 def rerank(query, docs, top_n=3):
     pairs = [(query, doc.page_content) for doc in docs]
     scores = reranker.predict(pairs)
-
     ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
     return [doc for _, doc in ranked[:top_n]]
 
@@ -130,54 +111,54 @@ def rerank(query, docs, top_n=3):
 with st.sidebar:
     st.title("⚙️ Controls")
 
-    mode = "🟢 Local (Ollama)" if USE_LOCAL else "☁️ Cloud (Gemini)"
+    mode = "🟢 Local (Ollama + FAISS)" if USE_LOCAL else "☁️ Cloud (Gemini + Chroma)"
     st.markdown(f"### Mode: {mode}")
-
-    st.divider()
 
     if st.button("🧹 Reset Chat"):
         st.session_state.messages = []
-        st.success("Chat cleared!")
 
     if st.button("🗑 Reset Knowledge Base"):
+        st.session_state.documents = None
         st.session_state.index = None
-        st.session_state.documents = []
+        st.session_state.vector_store = None
         st.session_state.bm25 = None
-        st.success("PDF cleared!")
-
-    st.divider()
 
     uploaded_file = st.file_uploader("📄 Upload PDF", type="pdf")
 
     if uploaded_file:
-        with st.spinner("📚 Processing PDF..."):
+        with st.spinner("Processing PDF..."):
 
-            file_path = "temp.pdf"
-            with open(file_path, "wb") as f:
+            with open("temp.pdf", "wb") as f:
                 f.write(uploaded_file.read())
 
-            loader = PyPDFLoader(file_path)
+            loader = PyPDFLoader("temp.pdf")
             documents = loader.load()
 
             splitter = RecursiveCharacterTextSplitter(
                 chunk_size=700,
                 chunk_overlap=150
             )
-            docs = splitter.split_documents(documents)
-
-            docs = docs[:15]
+            docs = splitter.split_documents(documents)[:15]
 
             texts = [doc.page_content for doc in docs]
-            embeddings = embedding_model.encode(texts)
 
-            dimension = embeddings.shape[1]
-            index = faiss.IndexFlatL2(dimension)
-            index.add(embeddings)
+            if USE_LOCAL:
+                embeddings = embedding_model.encode(texts)
 
-            st.session_state.index = index
-            st.session_state.documents = docs
+                dim = embeddings.shape[1]
+                index = faiss.IndexFlatL2(dim)
+                index.add(embeddings)
 
-            tokenized = [text.lower().split() for text in texts]
+                st.session_state.index = index
+                st.session_state.documents = docs
+
+            else:
+                st.session_state.vector_store = Chroma.from_documents(
+                    docs,
+                    embedding_model
+                )
+
+            tokenized = [t.lower().split() for t in texts]
             st.session_state.bm25 = BM25Okapi(tokenized)
 
         st.success("✅ PDF Ready!")
@@ -188,18 +169,16 @@ with st.sidebar:
 st.title("🤖 AI PDF Assistant")
 st.caption("Ask anything from your document 🚀")
 
-# avatars
 USER_AVATAR = "👤"
 BOT_AVATAR = "🤖"
 
-# chat display
 for msg in st.session_state.messages:
     avatar = USER_AVATAR if msg["role"] == "user" else BOT_AVATAR
     with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
 
 # =========================
-# CHAT INPUT
+# CHAT
 # =========================
 if question := st.chat_input("Ask your question..."):
 
@@ -209,17 +188,27 @@ if question := st.chat_input("Ask your question..."):
         st.markdown(question)
 
     with st.chat_message("assistant", avatar=BOT_AVATAR):
-        with st.spinner("🤔 Thinking..."):
+        with st.spinner("Thinking..."):
 
-            if st.session_state.index is None:
-                answer = "⚠️ Please upload a PDF first."
+            if USE_LOCAL and st.session_state.index is None:
+                answer = "⚠️ Upload PDF first."
+
+            elif not USE_LOCAL and st.session_state.vector_store is None:
+                answer = "⚠️ Upload PDF first."
 
             else:
-                docs = hybrid_search(question)
-                unique_docs = list({doc.page_content: doc for doc in docs}.values())
-                top_docs = rerank(question, unique_docs, top_n=3)
+                if USE_LOCAL:
+                    docs = hybrid_search(question)
+                else:
+                    retriever = st.session_state.vector_store.as_retriever(
+                        search_kwargs={"k": 3}
+                    )
+                    docs = retriever.invoke(question)
 
-                context = "\n\n".join([doc.page_content for doc in top_docs])
+                docs = list({doc.page_content: doc for doc in docs}.values())
+                docs = rerank(question, docs, top_n=3)
+
+                context = "\n\n".join([doc.page_content for doc in docs])
 
                 prompt = f"""
                 Answer ONLY using the context below.
