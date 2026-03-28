@@ -6,3 +6,6 @@ chromadb==0.4.24
 pypdf==4.2.0
 python-dotenv==1.0.1
 ddgs
+sentence-transformers
+rank-bm25
+numpy

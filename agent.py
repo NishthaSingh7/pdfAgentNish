@@ -1,20 +1,51 @@
 # =========================
+# CONFIG
+# =========================
+USE_LOCAL = True   # True → Ollama | False → Gemini
+
+# =========================
 # IMPORTS
 # =========================
 import os
-import shutil
+import numpy as np
 import streamlit as st
 from dotenv import load_dotenv
 
-from langchain.agents import initialize_agent, AgentType
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain_community.tools import Tool
-from langchain_community.vectorstores import Chroma
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from ddgs import DDGS
+
+from sentence_transformers import SentenceTransformer, CrossEncoder
+from rank_bm25 import BM25Okapi
+import faiss
 
 load_dotenv()
+
+# =========================
+# PAGE CONFIG 🔥
+# =========================
+st.set_page_config(
+    page_title="AI PDF Assistant",
+    page_icon="🤖",
+    layout="wide"
+)
+
+# =========================
+# CUSTOM CSS 💎
+# =========================
+st.markdown("""
+<style>
+.main {
+    background-color: #0E1117;
+}
+.block-container {
+    padding-top: 2rem;
+}
+.stChatMessage {
+    border-radius: 12px;
+    padding: 10px;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # =========================
 # SESSION STATE
@@ -22,181 +53,189 @@ load_dotenv()
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-if "vector_store" not in st.session_state:
-    st.session_state.vector_store = None
+if "index" not in st.session_state:
+    st.session_state.index = None
+
+if "documents" not in st.session_state:
+    st.session_state.documents = []
+
+if "bm25" not in st.session_state:
+    st.session_state.bm25 = None
 
 # =========================
-# API KEY
+# LLM LOADER
 # =========================
-try:
-    API_KEY = st.secrets["API_KEY"]
-except:
-    API_KEY = os.getenv("API_KEY")
+@st.cache_resource
+def load_llm():
+    if USE_LOCAL:
+        from langchain_community.chat_models import ChatOllama
+        return ChatOllama(model="llama3", temperature=0)
+    else:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        try:
+            API_KEY = st.secrets["API_KEY"]
+        except:
+            API_KEY = os.getenv("API_KEY")
+
+        return ChatGoogleGenerativeAI(
+            model="gemini-1.5-flash",
+            google_api_key=API_KEY,
+        )
+
+llm = load_llm()
 
 # =========================
-# LLM
+# LOCAL MODELS
 # =========================
-llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
-    google_api_key=API_KEY,
-)
+@st.cache_resource
+def load_embedding_model():
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+@st.cache_resource
+def load_reranker():
+    return CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+
+embedding_model = load_embedding_model()
+reranker = load_reranker()
 
 # =========================
-# SIDEBAR - PDF UPLOAD
+# SEARCH FUNCTIONS
+# =========================
+def vector_search(query, k=5):
+    query_vec = embedding_model.encode([query])
+    distances, indices = st.session_state.index.search(query_vec, k)
+    return [st.session_state.documents[i] for i in indices[0]]
+
+def hybrid_search(query):
+    vector_docs = vector_search(query, k=5)
+
+    tokenized = query.lower().split()
+    scores = st.session_state.bm25.get_scores(tokenized)
+    top_idx = np.argsort(scores)[-5:]
+
+    bm25_docs = [st.session_state.documents[i] for i in top_idx]
+
+    return vector_docs + bm25_docs
+
+def rerank(query, docs, top_n=3):
+    pairs = [(query, doc.page_content) for doc in docs]
+    scores = reranker.predict(pairs)
+
+    ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
+    return [doc for _, doc in ranked[:top_n]]
+
+# =========================
+# SIDEBAR 💎
 # =========================
 with st.sidebar:
-    st.header("📄 Upload PDFs")
+    st.title("⚙️ Controls")
 
-    if st.button("Reset Knowledge Base"):
-        st.session_state.vector_store = None
+    mode = "🟢 Local (Ollama)" if USE_LOCAL else "☁️ Cloud (Gemini)"
+    st.markdown(f"### Mode: {mode}")
+
+    st.divider()
+
+    if st.button("🧹 Reset Chat"):
         st.session_state.messages = []
-        st.success("Knowledge base cleared!")
+        st.success("Chat cleared!")
 
-    uploaded_files = st.file_uploader(
-        "Upload your PDFs",
-        type="pdf",
-        accept_multiple_files=True
-    )
+    if st.button("🗑 Reset Knowledge Base"):
+        st.session_state.index = None
+        st.session_state.documents = []
+        st.session_state.bm25 = None
+        st.success("PDF cleared!")
 
-    if uploaded_files:
-        with st.spinner("Processing PDFs..."):
-            all_docs = []
+    st.divider()
 
-            for uploaded_file in uploaded_files:
-                file_path = f"temp_{uploaded_file.name}"
-                with open(file_path, "wb") as f:
-                    f.write(uploaded_file.read())
+    uploaded_file = st.file_uploader("📄 Upload PDF", type="pdf")
 
-                loader = PyPDFLoader(file_path)
-                documents = loader.load()
+    if uploaded_file:
+        with st.spinner("📚 Processing PDF..."):
 
-                for doc in documents:
-                    doc.metadata["source"] = uploaded_file.name
-                    doc.metadata["page"] = doc.metadata.get("page", "Unknown")
+            file_path = "temp.pdf"
+            with open(file_path, "wb") as f:
+                f.write(uploaded_file.read())
 
-                all_docs.extend(documents)
-                os.remove(file_path)
+            loader = PyPDFLoader(file_path)
+            documents = loader.load()
 
             splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1200,
+                chunk_size=700,
                 chunk_overlap=150
             )
-            docs = splitter.split_documents(all_docs)
+            docs = splitter.split_documents(documents)
 
-            embedding_model = GoogleGenerativeAIEmbeddings(
-                model="models/gemini-embedding-001",
-                google_api_key=API_KEY
-            )
+            docs = docs[:15]
 
-            st.session_state.vector_store = Chroma.from_documents(
-                docs,
-                embedding_model
-            )
+            texts = [doc.page_content for doc in docs]
+            embeddings = embedding_model.encode(texts)
 
-        st.success("✅ Knowledge base created!")
+            dimension = embeddings.shape[1]
+            index = faiss.IndexFlatL2(dimension)
+            index.add(embeddings)
 
-# =========================
-# TOOLS
-# =========================
-def search_pdf(query):
-    if st.session_state.vector_store is None:
-        return "No PDF knowledge base found. Please upload PDFs first."
-    retriever = st.session_state.vector_store.as_retriever(search_kwargs={"k": 3})
-    docs = retriever.invoke(query)
-    if not docs:
-        return "No relevant info found in PDF."
-    return "\n\n".join([doc.page_content for doc in docs])
+            st.session_state.index = index
+            st.session_state.documents = docs
 
-pdf_tool = Tool(
-    name="PDF Knowledge Base",
-    func=search_pdf,
-    description="""
-Use this tool FIRST whenever the question is about the user,
-their resume, experience, education, skills, or personal info.
+            tokenized = [text.lower().split() for text in texts]
+            st.session_state.bm25 = BM25Okapi(tokenized)
 
-Always prioritize this tool over web search for personal queries.
-"""
-)
-
-def web_search(query):
-    with DDGS() as ddgs:
-        results = list(ddgs.text(query, max_results=5))
-        if not results:
-            return "No results found."
-        return "\n\n".join([f"{r['title']}\n{r['body']}" for r in results])
-
-web_tool = Tool(
-    name="Web Search",
-    func=web_search,
-    description="""
-Use this only for general knowledge questions NOT related to uploaded PDFs.
-Do NOT use this for personal or resume-related queries.
-"""
-)
+        st.success("✅ PDF Ready!")
 
 # =========================
-# AGENT
+# MAIN UI 💎
 # =========================
-tools = [pdf_tool, web_tool]
+st.title("🤖 AI PDF Assistant")
+st.caption("Ask anything from your document 🚀")
 
-agent_executor = initialize_agent(
-    tools=tools,
-    llm=llm,
-    agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-    verbose=True,
-    handle_parsing_errors=True
-)
+# avatars
+USER_AVATAR = "👤"
+BOT_AVATAR = "🤖"
 
-# =========================
-# ROUTING LOGIC 🔥
-# =========================
-def is_simple_chat(query):
-    casual = ["hi", "hello", "how are you", "who are you"]
-    return any(word in query.lower() for word in casual)
-
-def is_resume_query(query):
-    keywords = ["my", "resume", "experience", "skills", "education", "who am i"]
-    return any(word in query.lower() for word in keywords)
-
-# =========================
-# MAIN UI
-# =========================
-st.title("🤖 AI Agent")
-st.write("Upload PDFs in sidebar, then chat with AI!")
-
-# Chat history
+# chat display
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
+    avatar = USER_AVATAR if msg["role"] == "user" else BOT_AVATAR
+    with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
 
-# Input
-if question := st.chat_input("Ask something..."):
+# =========================
+# CHAT INPUT
+# =========================
+if question := st.chat_input("Ask your question..."):
+
     st.session_state.messages.append({"role": "user", "content": question})
 
-    with st.chat_message("user"):
+    with st.chat_message("user", avatar=USER_AVATAR):
         st.markdown(question)
 
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
+    with st.chat_message("assistant", avatar=BOT_AVATAR):
+        with st.spinner("🤔 Thinking..."):
 
-            try:
-                if is_simple_chat(question):
-                    response = llm.invoke(question)
-                    answer = response.content
+            if st.session_state.index is None:
+                answer = "⚠️ Please upload a PDF first."
 
-                elif is_resume_query(question):
-                    # 🔥 FORCE PDF usage
-                    answer = search_pdf(question)
+            else:
+                docs = hybrid_search(question)
+                unique_docs = list({doc.page_content: doc for doc in docs}.values())
+                top_docs = rerank(question, unique_docs, top_n=3)
 
-                else:
-                    response = agent_executor.invoke({"input": question})
-                    answer = response.get("output", str(response))
+                context = "\n\n".join([doc.page_content for doc in top_docs])
 
-            except Exception:
-                # fallback to LLM
-                response = llm.invoke(question)
+                prompt = f"""
+                Answer ONLY using the context below.
+
+                If not found, say "Not found in document."
+
+                Context:
+                {context}
+
+                Question:
+                {question}
+                """
+
+                response = llm.invoke(prompt)
                 answer = response.content
 
-            st.markdown(answer)
+        st.markdown(answer)
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
