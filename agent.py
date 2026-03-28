@@ -30,7 +30,11 @@ if "vector_store" not in st.session_state:
 # =========================
 # LLM + PROMPT
 # =========================
-API_KEY = st.secrets.get("API_KEY") or os.getenv("API_KEY")
+try:
+    API_KEY = st.secrets["API_KEY"]
+except:
+    API_KEY = os.getenv("API_KEY")
+
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
       google_api_key=API_KEY,
