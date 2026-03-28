@@ -3,6 +3,7 @@
 # =========================
 from langchain.agents import initialize_agent, AgentType
 import shutil
+import os
 import streamlit as st
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
