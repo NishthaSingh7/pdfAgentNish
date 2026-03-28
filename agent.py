@@ -1,14 +1,14 @@
 # =========================
 # CONFIG 🔥
 # =========================
-USE_LOCAL = False   # 🔁 IMPORTANT
-# True  → Local (Ollama + FAISS)
-# False → Cloud (Gemini + Chroma)
+USE_LOCAL = False   # True → Local | False → Cloud
 
 # =========================
 # IMPORTS
 # =========================
 import os
+import time
+import threading
 import numpy as np
 import streamlit as st
 from dotenv import load_dotenv
@@ -55,8 +55,11 @@ if "index" not in st.session_state:
 if "vector_store" not in st.session_state:
     st.session_state.vector_store = None
 
+if "last_call" not in st.session_state:
+    st.session_state.last_call = 0
+
 # =========================
-# LLM LOADER
+# LLM
 # =========================
 @st.cache_resource
 def load_llm():
@@ -67,7 +70,7 @@ def load_llm():
         from langchain_google_genai import ChatGoogleGenerativeAI
         API_KEY = st.secrets.get("API_KEY") or os.getenv("API_KEY")
         return ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
+            model="gemini-1.5-flash",
             google_api_key=API_KEY
         )
 
@@ -88,7 +91,7 @@ embedding_model = load_embedding()
 reranker = load_reranker()
 
 # =========================
-# SEARCH FUNCTIONS
+# SEARCH
 # =========================
 def vector_search(query, k=5):
     query_vec = embedding_model.encode([query])
@@ -106,7 +109,7 @@ def hybrid_search(query):
 
     return vector_docs + bm25_docs
 
-def rerank(query, docs, top_n=3):
+def rerank(query, docs, top_n=2):  # 🔥 reduced
     pairs = [(query, doc.page_content) for doc in docs]
     scores = reranker.predict(pairs)
     ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
@@ -118,7 +121,7 @@ def rerank(query, docs, top_n=3):
 with st.sidebar:
     st.title("⚙️ Controls")
 
-    mode = "🟢 Local (Ollama)" if USE_LOCAL else "☁️ Cloud (Gemini)"
+    mode = "🟢 Local" if USE_LOCAL else "☁️ Cloud"
     st.markdown(f"### Mode: {mode}")
 
     if st.button("🧹 Reset Chat"):
@@ -150,8 +153,7 @@ with st.sidebar:
             texts = [doc.page_content for doc in docs]
 
             if USE_LOCAL:
-                import faiss  # safe local import
-
+                import faiss
                 embeddings = embedding_model.encode(texts)
                 dim = embeddings.shape[1]
 
@@ -162,7 +164,6 @@ with st.sidebar:
                 st.session_state.documents = docs
 
             else:
-                # 🔥 FIX: use proper embedding wrapper for Chroma
                 from langchain_community.embeddings import HuggingFaceEmbeddings
 
                 hf_embed = HuggingFaceEmbeddings(
@@ -180,16 +181,13 @@ with st.sidebar:
         st.success("✅ PDF Ready!")
 
 # =========================
-# MAIN UI
+# UI
 # =========================
 st.title("🤖 AI PDF Assistant")
 st.caption("Ask anything from your document 🚀")
 
-USER_AVATAR = "👤"
-BOT_AVATAR = "🤖"
-
 for msg in st.session_state.messages:
-    avatar = USER_AVATAR if msg["role"] == "user" else BOT_AVATAR
+    avatar = "👤" if msg["role"] == "user" else "🤖"
     with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
 
@@ -198,18 +196,23 @@ for msg in st.session_state.messages:
 # =========================
 if question := st.chat_input("Ask your question..."):
 
+    # 🔥 RATE LIMIT
+    if time.time() - st.session_state.last_call < 2:
+        st.warning("⚠️ Slow down a bit bro 😄")
+        st.stop()
+
+    st.session_state.last_call = time.time()
+
     st.session_state.messages.append({"role": "user", "content": question})
 
-    with st.chat_message("user", avatar=USER_AVATAR):
+    with st.chat_message("user", avatar="👤"):
         st.markdown(question)
 
-    with st.chat_message("assistant", avatar=BOT_AVATAR):
+    with st.chat_message("assistant", avatar="🤖"):
         with st.spinner("Thinking..."):
 
-            if USE_LOCAL and st.session_state.index is None:
-                answer = "⚠️ Upload PDF first."
-
-            elif not USE_LOCAL and st.session_state.vector_store is None:
+            if (USE_LOCAL and st.session_state.index is None) or \
+               (not USE_LOCAL and st.session_state.vector_store is None):
                 answer = "⚠️ Upload PDF first."
 
             else:
@@ -222,9 +225,10 @@ if question := st.chat_input("Ask your question..."):
                     docs = retriever.invoke(question)
 
                 docs = list({doc.page_content: doc for doc in docs}.values())
-                docs = rerank(question, docs, top_n=3)
+                docs = rerank(question, docs)
 
-                context = "\n\n".join([doc.page_content for doc in docs])
+                # 🔥 REDUCED CONTEXT
+                context = "\n\n".join([doc.page_content[:200] for doc in docs])
 
                 prompt = f"""
                 Answer ONLY using the context below.
@@ -238,12 +242,25 @@ if question := st.chat_input("Ask your question..."):
                 {question}
                 """
 
-                try:
-                    response = llm.invoke(prompt)
-                    answer = response.content
-                except Exception as e:
-                    answer = f"❌ Error: {str(e)}"
-                    st.error(answer)
+                time.sleep(1.2)  # 🔥 avoid rate limit
+
+                answer = "⚠️ Timeout. Try again."
+
+                def call_llm():
+                    nonlocal answer
+                    try:
+                        response = llm.invoke(prompt)
+                        answer = response.content
+                    except Exception as e:
+                        answer = f"❌ Error: {str(e)}"
+
+                thread = threading.Thread(target=call_llm)
+                thread.start()
+                thread.join(timeout=10)
+
+                if thread.is_alive():
+                    st.error("⏳ Request timed out. Try again.")
+                    thread.join(0)
 
         st.markdown(answer)
 
