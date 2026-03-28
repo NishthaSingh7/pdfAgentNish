@@ -1,7 +1,8 @@
 # =========================
 # IMPORTS
 # =========================
-from langchain.agents import create_react_agent, AgentExecutor
+from langchain.agents import initialize_agent, AgentType
+from langchain.agents import AgentExecutor
 import shutil
 import streamlit as st
 from dotenv import load_dotenv
@@ -149,9 +150,12 @@ web_tool = Tool(
 # AGENT
 # =========================
 tools = [pdf_tool, web_tool]
-agent = create_react_agent(llm=llm, tools=tools, prompt=prompt)
-agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
-
+agent_executor = initialize_agent(
+    tools=tools,
+    llm=llm,
+    agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+    verbose=True
+)
 # =========================
 # MAIN UI
 # =========================
