@@ -238,8 +238,12 @@ if question := st.chat_input("Ask your question..."):
                 {question}
                 """
 
-                response = llm.invoke(prompt)
-                answer = response.content
+                try:
+                    response = llm.invoke(prompt)
+                    answer = response.content
+                except Exception as e:
+                    answer = f"❌ Error: {str(e)}"
+                    st.error(answer)
 
         st.markdown(answer)
 
