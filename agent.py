@@ -245,14 +245,21 @@ if question := st.chat_input("Ask your question..."):
                 time.sleep(1.2)  # 🔥 avoid rate limit
 
                 answer = "⚠️ Timeout. Try again."
+                result = {"answer": "⚠️ Timeout. Try again."}
 
                 def call_llm():
-                    nonlocal answer
                     try:
                         response = llm.invoke(prompt)
-                        answer = response.content
+                        result["answer"] = response.content
                     except Exception as e:
-                        answer = f"❌ Error: {str(e)}"
+                        result["answer"] = f"❌ Error: {str(e)}"
+
+                thread = threading.Thread(target=call_llm)
+                thread.start()
+                thread.join(timeout=10)
+
+                if thread.is_alive():
+                    st.error("⏳ Request timed out. Try again.")
 
                 thread = threading.Thread(target=call_llm)
                 thread.start()
