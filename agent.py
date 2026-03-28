@@ -1,7 +1,7 @@
 # =========================
 # IMPORTS
 # =========================
-from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain.agents import create_react_agent, AgentExecutor
 import shutil
 import streamlit as st
 from dotenv import load_dotenv
