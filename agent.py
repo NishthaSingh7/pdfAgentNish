@@ -70,7 +70,7 @@ def load_llm():
         from langchain_google_genai import ChatGoogleGenerativeAI
         API_KEY = st.secrets.get("API_KEY") or os.getenv("API_KEY")
         return ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
+            model="gemini-1.5-flash-latest",  # 🔥 faster
             google_api_key=API_KEY
         )
 
@@ -109,7 +109,7 @@ def hybrid_search(query):
 
     return vector_docs + bm25_docs
 
-def rerank(query, docs, top_n=2):  # 🔥 reduced
+def rerank(query, docs, top_n=2):
     pairs = [(query, doc.page_content) for doc in docs]
     scores = reranker.predict(pairs)
     ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
@@ -196,7 +196,7 @@ for msg in st.session_state.messages:
 # =========================
 if question := st.chat_input("Ask your question..."):
 
-    # 🔥 RATE LIMIT
+    # 🔥 Rate limit
     if time.time() - st.session_state.last_call < 2:
         st.warning("⚠️ Slow down a bit bro 😄")
         st.stop()
@@ -227,8 +227,7 @@ if question := st.chat_input("Ask your question..."):
                 docs = list({doc.page_content: doc for doc in docs}.values())
                 docs = rerank(question, docs)
 
-                # 🔥 REDUCED CONTEXT
-                context = "\n\n".join([doc.page_content[:200] for doc in docs])
+                context = "\n\n".join([doc.page_content[:300] for doc in docs])
 
                 prompt = f"""
                 Answer ONLY using the context below.
@@ -242,32 +241,13 @@ if question := st.chat_input("Ask your question..."):
                 {question}
                 """
 
-                time.sleep(1.2)  # 🔥 avoid rate limit
+                st.info("🚀 Generating answer... (first response may take ~10-15s)")
 
-                answer = "⚠️ Timeout. Try again."
-                result = {"answer": "⚠️ Timeout. Try again."}
-
-                def call_llm():
-                    try:
-                        response = llm.invoke(prompt)
-                        result["answer"] = response.content
-                    except Exception as e:
-                        result["answer"] = f"❌ Error: {str(e)}"
-
-                thread = threading.Thread(target=call_llm)
-                thread.start()
-                thread.join(timeout=10)
-
-                if thread.is_alive():
-                    st.error("⏳ Request timed out. Try again.")
-
-                thread = threading.Thread(target=call_llm)
-                thread.start()
-                thread.join(timeout=10)
-
-                if thread.is_alive():
-                    st.error("⏳ Request timed out. Try again.")
-                    thread.join(0)
+                try:
+                    response = llm.invoke(prompt)
+                    answer = response.content
+                except Exception as e:
+                    answer = f"❌ Error: {str(e)}"
 
         st.markdown(answer)
 
