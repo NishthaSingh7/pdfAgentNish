@@ -2,7 +2,6 @@
 # IMPORTS
 # =========================
 from langchain.agents import initialize_agent, AgentType
-from langchain.agents import AgentExecutor
 import shutil
 import streamlit as st
 from dotenv import load_dotenv
@@ -11,6 +10,7 @@ from langchain_community.tools import Tool
 from langchain_community.vectorstores import Chroma
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain import hub
 from ddgs import DDGS
 
 load_dotenv()
