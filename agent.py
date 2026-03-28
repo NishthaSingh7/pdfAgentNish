@@ -1,8 +1,9 @@
 # =========================
 # CONFIG 🔥
 # =========================
-USE_LOCAL = True   # True → Local (Ollama + FAISS)
-                  # False → Cloud (Gemini + Chroma)
+USE_LOCAL = False   # 🔁 IMPORTANT
+# True  → Local (Ollama + FAISS)
+# False → Cloud (Gemini + Chroma)
 
 # =========================
 # IMPORTS
@@ -14,25 +15,20 @@ from dotenv import load_dotenv
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import Chroma
 
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
 
-# conditional import
-if USE_LOCAL:
-    import faiss
-else:
-    from langchain_community.vectorstores import Chroma
-
 load_dotenv()
 
 # =========================
-# PAGE CONFIG 💎
+# PAGE CONFIG
 # =========================
 st.set_page_config(page_title="AI PDF Assistant", page_icon="🤖", layout="wide")
 
 # =========================
-# CSS 💎
+# CSS
 # =========================
 st.markdown("""
 <style>
@@ -44,9 +40,20 @@ st.markdown("""
 # =========================
 # SESSION STATE
 # =========================
-for key in ["messages", "documents", "bm25", "index", "vector_store"]:
-    if key not in st.session_state:
-        st.session_state[key] = None if key != "messages" else []
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "documents" not in st.session_state:
+    st.session_state.documents = None
+
+if "bm25" not in st.session_state:
+    st.session_state.bm25 = None
+
+if "index" not in st.session_state:
+    st.session_state.index = None
+
+if "vector_store" not in st.session_state:
+    st.session_state.vector_store = None
 
 # =========================
 # LLM LOADER
@@ -67,7 +74,7 @@ def load_llm():
 llm = load_llm()
 
 # =========================
-# MODELS (LOCAL ONLY)
+# MODELS
 # =========================
 @st.cache_resource
 def load_embedding():
@@ -106,12 +113,12 @@ def rerank(query, docs, top_n=3):
     return [doc for _, doc in ranked[:top_n]]
 
 # =========================
-# SIDEBAR 💎
+# SIDEBAR
 # =========================
 with st.sidebar:
     st.title("⚙️ Controls")
 
-    mode = "🟢 Local (Ollama + FAISS)" if USE_LOCAL else "☁️ Cloud (Gemini + Chroma)"
+    mode = "🟢 Local (Ollama)" if USE_LOCAL else "☁️ Cloud (Gemini)"
     st.markdown(f"### Mode: {mode}")
 
     if st.button("🧹 Reset Chat"):
@@ -143,9 +150,11 @@ with st.sidebar:
             texts = [doc.page_content for doc in docs]
 
             if USE_LOCAL:
-                embeddings = embedding_model.encode(texts)
+                import faiss  # safe local import
 
+                embeddings = embedding_model.encode(texts)
                 dim = embeddings.shape[1]
+
                 index = faiss.IndexFlatL2(dim)
                 index.add(embeddings)
 
@@ -153,9 +162,16 @@ with st.sidebar:
                 st.session_state.documents = docs
 
             else:
+                # 🔥 FIX: use proper embedding wrapper for Chroma
+                from langchain_community.embeddings import HuggingFaceEmbeddings
+
+                hf_embed = HuggingFaceEmbeddings(
+                    model_name="sentence-transformers/all-MiniLM-L6-v2"
+                )
+
                 st.session_state.vector_store = Chroma.from_documents(
                     docs,
-                    embedding_model
+                    hf_embed
                 )
 
             tokenized = [t.lower().split() for t in texts]
@@ -164,7 +180,7 @@ with st.sidebar:
         st.success("✅ PDF Ready!")
 
 # =========================
-# MAIN UI 💎
+# MAIN UI
 # =========================
 st.title("🤖 AI PDF Assistant")
 st.caption("Ask anything from your document 🚀")
