@@ -10,7 +10,6 @@ from langchain_community.tools import Tool
 from langchain_community.vectorstores import Chroma
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain import hub
 from ddgs import DDGS
 
 load_dotenv()
@@ -38,7 +37,6 @@ llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
       google_api_key=API_KEY,
 )
-prompt = hub.pull("hwchase17/react")
 
 # =========================
 # SIDEBAR - PDF UPLOAD
