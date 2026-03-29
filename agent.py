@@ -18,7 +18,7 @@ from langchain_community.vectorstores import Chroma
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
 
-from groq import Groq   # 🔥 NEW
+from groq import Groq
 
 load_dotenv()
 
@@ -61,14 +61,14 @@ def query_llm(prompt):
                 {
                     "role": "system",
                     "content": """
-You are an expert AI resume assistant.
+You are an expert resume analyst.
 
 Guidelines:
-- Answer using ONLY the provided context.
-- If exact information is not present, infer logically from available details.
-- If something is ongoing, assume it applies to recent years.
-- Avoid saying "no information" unless absolutely nothing is relevant.
-- Be concise, clear, and confident.
+- Focus on work experience and timeline
+- Combine multiple sections if needed
+- Infer logically when year is implicit
+- NEVER ignore job roles if present
+- Be concise and confident
 """
                 },
                 {
@@ -84,45 +84,12 @@ Guidelines:
 
     except Exception as e:
         return f"❌ Groq Error: {str(e)}"
-# =========================
-# LOCAL SEARCH
-# =========================
-def vector_search(query, k=5):
-    query_vec = embedding_model.encode([query])
-    _, indices = st.session_state.index.search(query_vec, k)
-    return [st.session_state.documents[i] for i in indices[0]]
-
-def hybrid_search(query):
-    vector_docs = vector_search(query, k=5)
-    tokenized = query.lower().split()
-    scores = st.session_state.bm25.get_scores(tokenized)
-    top_idx = np.argsort(scores)[-5:]
-    bm25_docs = [st.session_state.documents[i] for i in top_idx]
-    return vector_docs + bm25_docs
-
-def rerank(query, docs, top_n=2):
-    pairs = [(query, doc.page_content) for doc in docs]
-    scores = reranker.predict(pairs)
-    ranked = sorted(zip(scores, docs), key=lambda x: x[0], reverse=True)
-    return [doc for _, doc in ranked[:top_n]]
 
 # =========================
-# SIDEBAR
+# SIDEBAR (PDF UPLOAD)
 # =========================
 with st.sidebar:
     st.title("⚙️ Controls")
-
-    mode = "🟢 Local (Ollama)" if USE_LOCAL else "☁️ Cloud (Groq)"
-    st.markdown(f"### Mode: {mode}")
-
-    if st.button("Reset Chat"):
-        st.session_state.messages = []
-
-    if st.button("Reset Knowledge Base"):
-        st.session_state.documents = None
-        st.session_state.index = None
-        st.session_state.vector_store = None
-        st.session_state.bm25 = None
 
     uploaded_file = st.file_uploader("Upload PDF", type="pdf")
 
@@ -136,45 +103,29 @@ with st.sidebar:
             documents = loader.load()
 
             splitter = RecursiveCharacterTextSplitter(
-                chunk_size=700,
-                chunk_overlap=150
+                chunk_size=1000,
+                chunk_overlap=200
             )
+
             docs = splitter.split_documents(documents)[:40]
 
-            texts = [doc.page_content for doc in docs]
+            from langchain_community.embeddings import HuggingFaceEmbeddings
 
-            if USE_LOCAL:
-                import faiss
-                embeddings = embedding_model.encode(texts)
-                dim = embeddings.shape[1]
+            hf_embed = HuggingFaceEmbeddings(
+                model_name="sentence-transformers/all-MiniLM-L6-v2"
+            )
 
-                index = faiss.IndexFlatL2(dim)
-                index.add(embeddings)
-
-                st.session_state.index = index
-                st.session_state.documents = docs
-
-                tokenized = [t.lower().split() for t in texts]
-                st.session_state.bm25 = BM25Okapi(tokenized)
-
-            else:
-                from langchain_community.embeddings import HuggingFaceEmbeddings
-
-                hf_embed = HuggingFaceEmbeddings(
-                    model_name="sentence-transformers/all-MiniLM-L6-v2"
-                )
-
-                st.session_state.vector_store = Chroma.from_documents(
-                    docs,
-                    hf_embed
-                )
+            st.session_state.vector_store = Chroma.from_documents(
+                docs,
+                hf_embed
+            )
 
         st.success("✅ PDF Ready!")
 
 # =========================
 # UI
 # =========================
-st.title("🤖 AI PDF Assistant")
+st.title("🤖 AI Resume Assistant")
 
 for msg in st.session_state.messages:
     avatar = "👤" if msg["role"] == "user" else "🤖"
@@ -184,69 +135,68 @@ for msg in st.session_state.messages:
 # =========================
 # CHAT
 # =========================
-if question := st.chat_input("Ask your question..."):
+if question := st.chat_input("Ask about resume..."):
 
     st.session_state.messages.append({"role": "user", "content": question})
-
-    with st.chat_message("user"):
-        st.markdown(question)
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
 
-            # =========================
-            # LOCAL MODE
-            # =========================
-            if USE_LOCAL:
-                if st.session_state.index is None:
-                    answer = "Upload PDF first."
-                else:
-                    docs = hybrid_search(question)
-                    docs = list({d.page_content: d for d in docs}.values())
-                    docs = rerank(question, docs)
-
-                    context = "\n\n".join([doc.page_content[:200] for doc in docs])
-
-                    from langchain_community.chat_models import ChatOllama
-                    llm = ChatOllama(model="llama3", temperature=0)
-
-                    response = llm.invoke(f"Context:\n{context}\n\nQ: {question}")
-                    answer = response.content
-
-            # =========================
-            # CLOUD MODE (GROQ)
-            # =========================
+            if st.session_state.vector_store is None:
+                answer = "Upload PDF first."
             else:
-                if st.session_state.vector_store is None:
-                    answer = "Upload PDF first."
-                else:
-                    retriever = st.session_state.vector_store.as_retriever(
-                        search_kwargs={"k": 6},
-                        chunk_size = 1000,
-                        chunk_overlap = 200
-                    )
-                    docs = retriever.invoke(question)
+                retriever = st.session_state.vector_store.as_retriever(
+                    search_kwargs={"k": 10}
+                )
 
-                    unique_docs = list({doc.page_content: doc for doc in docs}.values())
-                    context = "\n\n".join([doc.page_content for doc in unique_docs])
-                    prompt = f"""
-You are an expert resume analyst.
+                # 🔥 QUERY STEERING
+                enhanced_query = f"""
+{question}
 
-Instructions:
-- Carefully analyze the timeline of experience.
-- Combine information across multiple sections if needed.
-- Infer answers when exact year is not explicitly mentioned.
-- Do NOT say "no information" if relevant experience exists.
+Focus on:
+- work experience
+- jobs
+- roles
+- employment timeline
+- years like 2023, 2024, 2025
+"""
+
+                docs = retriever.invoke(enhanced_query)
+
+                # 🔥 FILTER RELEVANT CHUNKS
+                filtered_docs = []
+                for doc in docs:
+                    text = doc.page_content.lower()
+
+                    if any(keyword in text for keyword in [
+                        "experience", "developer", "engineer",
+                        "worked", "training", "2023", "2024", "2025"
+                    ]):
+                        filtered_docs.append(doc)
+
+                if filtered_docs:
+                    docs = filtered_docs
+
+                # 🔥 MERGE CONTEXT
+                unique_docs = list({doc.page_content: doc for doc in docs}.values())
+                context = "\n\n".join([doc.page_content for doc in unique_docs])
+
+                # 🔥 FINAL PROMPT
+                prompt = f"""
+Analyze the resume context carefully.
+
+- Extract experience based on timeline
+- Combine multiple roles if needed
+- Answer clearly
 
 Context:
 {context}
 
 Question:
 {question}
-Answer clearly and confidently:
 """
 
-                    answer = query_llm(prompt)
+                answer = query_llm(prompt)
 
         st.markdown(answer)
 
