@@ -61,7 +61,7 @@ def query_llm(prompt):
                 {"role": "system", "content": "Answer ONLY from the provided context."},
                 {"role": "user", "content": prompt}
             ],
-            model="llama3-8b-8192",   # ✅ FIXED
+            model="llama-3.1-8b-instant",   # ✅ FINAL WORKING MODEL
             temperature=0.2,
         )
 
@@ -69,7 +69,6 @@ def query_llm(prompt):
 
     except Exception as e:
         return f"❌ Groq Error: {str(e)}"
-
 # =========================
 # LOCAL SEARCH
 # =========================
