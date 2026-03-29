@@ -1,7 +1,7 @@
 # =========================
 # CONFIG 🔥
 # =========================
-USE_LOCAL = False   # True → Advanced (Ollama) | False → Simple (Gemini)
+USE_LOCAL = False   # True → Ollama | False → Gemini
 
 # =========================
 # IMPORTS
@@ -18,7 +18,8 @@ from langchain_community.vectorstores import Chroma
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
 
-import google.generativeai as genai
+# ✅ NEW GEMINI SDK
+from google import genai
 
 load_dotenv()
 
@@ -49,11 +50,12 @@ embedding_model = load_embedding()
 reranker = load_reranker()
 
 # =========================
-# GEMINI CONFIG (SIMPLE 🔥)
+# GEMINI CLIENT (FIXED 🔥)
 # =========================
 if not USE_LOCAL:
-    genai.configure(api_key=st.secrets.get("API_KEY") or os.getenv("API_KEY"))
-    gemini_model = genai.GenerativeModel("gemini-1.5-flash-latest")
+    client = genai.Client(
+        api_key=st.secrets.get("API_KEY") or os.getenv("API_KEY")
+    )
 
 # =========================
 # LOCAL SEARCH (UNCHANGED)
@@ -165,6 +167,9 @@ if question := st.chat_input("Ask your question..."):
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
 
+            # =========================
+            # LOCAL (UNCHANGED)
+            # =========================
             if USE_LOCAL:
                 if st.session_state.index is None:
                     answer = "Upload PDF first."
@@ -176,14 +181,14 @@ if question := st.chat_input("Ask your question..."):
                     context = "\n\n".join([doc.page_content[:200] for doc in docs])
 
                     prompt = f"""
-                    Answer based only on the context.
+Answer based only on the context.
 
-                    Context:
-                    {context}
+Context:
+{context}
 
-                    Question:
-                    {question}
-                    """
+Question:
+{question}
+"""
 
                     from langchain_community.chat_models import ChatOllama
                     llm = ChatOllama(model="llama3", temperature=0)
@@ -191,6 +196,9 @@ if question := st.chat_input("Ask your question..."):
                     response = llm.invoke(prompt)
                     answer = response.content
 
+            # =========================
+            # CLOUD (FIXED GEMINI 🔥)
+            # =========================
             else:
                 if st.session_state.vector_store is None:
                     answer = "Upload PDF first."
@@ -202,14 +210,13 @@ if question := st.chat_input("Ask your question..."):
 
                     context = "\n\n".join([doc.page_content[:150] for doc in docs])
 
-                    # 🔥 CLEAN PROMPT (VERY IMPORTANT)
                     prompt = f"""
 You are a strict AI assistant.
 
 Answer ONLY from the given context.
 If answer is not present, say: "Not found in document."
 
-Keep answer concise and clear.
+Keep answer concise.
 
 Context:
 {context}
@@ -219,12 +226,12 @@ Question:
 """
 
                     try:
-                        response = gemini_model.generate_content(prompt)
+                        response = client.models.generate_content(
+                            model="gemini-1.5-flash",
+                            contents=prompt
+                        )
 
-                        if response and response.text:
-                            answer = response.text
-                        else:
-                            answer = "⚠️ No response from AI."
+                        answer = response.text if response.text else "⚠️ No response."
 
                     except Exception as e:
                         answer = f"❌ Error: {str(e)}"
