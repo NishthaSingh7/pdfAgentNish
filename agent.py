@@ -1,22 +1,14 @@
 # =========================
-# CONFIG 🔥
-# =========================
-USE_LOCAL = False   # True → Ollama | False → Groq
-
-# =========================
 # IMPORTS
 # =========================
 import os
-import numpy as np
 import streamlit as st
 from dotenv import load_dotenv
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
-
-from sentence_transformers import SentenceTransformer, CrossEncoder
-from rank_bm25 import BM25Okapi
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
 from groq import Groq
 
@@ -25,73 +17,31 @@ load_dotenv()
 # =========================
 # PAGE CONFIG
 # =========================
-st.set_page_config(page_title="AI PDF Assistant", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="AI Resume Assistant", page_icon="🤖", layout="wide")
 
 # =========================
 # SESSION STATE
 # =========================
-for key in ["messages", "documents", "index", "vector_store", "bm25"]:
-    if key not in st.session_state:
-        st.session_state[key] = None if key != "messages" else []
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "vector_store" not in st.session_state:
+    st.session_state.vector_store = None
 
 # =========================
-# LOCAL MODELS
-# =========================
-@st.cache_resource
-def load_embedding():
-    return SentenceTransformer("all-MiniLM-L6-v2")
-
-@st.cache_resource
-def load_reranker():
-    return CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-
-embedding_model = load_embedding()
-reranker = load_reranker()
-
-# =========================
-# GROQ CLIENT 🔥
-# =========================
-if not USE_LOCAL:
-    client = Groq(api_key=st.secrets.get("GROQ_API_KEY"))
-
-def query_llm(prompt):
-    try:
-        chat_completion = client.chat.completions.create(
-            messages=[
-                {
-                    "role": "system",
-                    "content": """
-You are an expert resume analyst.
-
-Guidelines:
-- Focus on work experience and timeline
-- Combine multiple sections if needed
-- Infer logically when year is implicit
-- NEVER ignore job roles if present
-- Be concise and confident
-"""
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            model="llama-3.1-8b-instant",
-            temperature=0.2,
-        )
-
-        return chat_completion.choices[0].message.content
-
-    except Exception as e:
-        return f"❌ Groq Error: {str(e)}"
-
-# =========================
-# SIDEBAR (PDF UPLOAD)
+# SIDEBAR
 # =========================
 with st.sidebar:
     st.title("⚙️ Controls")
 
-    uploaded_file = st.file_uploader("Upload PDF", type="pdf")
+    USE_LOCAL = st.toggle("🟢 Use Local LLM (Ollama)", value=False)
+
+    mode = "🟢 Local (Ollama)" if USE_LOCAL else "☁️ Cloud (Groq)"
+    st.markdown(f"### Mode: {mode}")
+
+    st.divider()
+
+    uploaded_file = st.file_uploader("📄 Upload Resume PDF", type="pdf")
 
     if uploaded_file:
         with st.spinner("Processing PDF..."):
@@ -107,33 +57,63 @@ with st.sidebar:
                 chunk_overlap=200
             )
 
-            docs = splitter.split_documents(documents)[:40]
+            docs = splitter.split_documents(documents)
 
-            from langchain_community.embeddings import HuggingFaceEmbeddings
-
-            hf_embed = HuggingFaceEmbeddings(
+            embedder = HuggingFaceEmbeddings(
                 model_name="sentence-transformers/all-MiniLM-L6-v2"
             )
 
-            st.session_state.vector_store = Chroma.from_documents(
-                docs,
-                hf_embed
-            )
+            st.session_state.vector_store = Chroma.from_documents(docs, embedder)
 
-        st.success("✅ PDF Ready!")
+        st.success("✅ Resume Loaded!")
 
 # =========================
-# UI
+# GROQ SETUP
+# =========================
+if not USE_LOCAL:
+    client = Groq(api_key=st.secrets.get("GROQ_API_KEY"))
+
+def query_llm(prompt):
+    try:
+        response = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": """
+You are an expert resume analyst.
+
+- Focus on experience and timeline
+- Combine multiple roles if needed
+- Answer clearly
+"""
+                },
+                {"role": "user", "content": prompt}
+            ],
+            model="llama-3.1-8b-instant",
+            temperature=0.2,
+        )
+
+        return response.choices[0].message.content
+
+    except Exception as e:
+        return f"❌ Groq Error: {str(e)}"
+
+# =========================
+# UI HEADER
 # =========================
 st.title("🤖 AI Resume Assistant")
+st.caption("Ask anything about the uploaded resume — powered by RAG + LLM")
 
+# =========================
+# DISPLAY CHAT
+# =========================
 for msg in st.session_state.messages:
     avatar = "👤" if msg["role"] == "user" else "🤖"
     with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
 
 # =========================
-# CHAT
+# CHAT INPUT
 # =========================
 if question := st.chat_input("Ask about resume..."):
 
@@ -143,13 +123,14 @@ if question := st.chat_input("Ask about resume..."):
         with st.spinner("Thinking..."):
 
             if st.session_state.vector_store is None:
-                answer = "Upload PDF first."
+                answer = "⚠️ Please upload a PDF first."
+                sources = []
             else:
                 retriever = st.session_state.vector_store.as_retriever(
                     search_kwargs={"k": 10}
                 )
 
-                # 🔥 QUERY STEERING
+                # 🔥 Query Enhancement
                 enhanced_query = f"""
 {question}
 
@@ -157,18 +138,17 @@ Focus on:
 - work experience
 - jobs
 - roles
-- employment timeline
+- timeline
 - years like 2023, 2024, 2025
 """
 
                 docs = retriever.invoke(enhanced_query)
 
-                # 🔥 FILTER RELEVANT CHUNKS
+                # 🔥 Filter Relevant Chunks
                 filtered_docs = []
                 for doc in docs:
                     text = doc.page_content.lower()
-
-                    if any(keyword in text for keyword in [
+                    if any(word in text for word in [
                         "experience", "developer", "engineer",
                         "worked", "training", "2023", "2024", "2025"
                     ]):
@@ -177,17 +157,13 @@ Focus on:
                 if filtered_docs:
                     docs = filtered_docs
 
-                # 🔥 MERGE CONTEXT
-                unique_docs = list({doc.page_content: doc for doc in docs}.values())
-                context = "\n\n".join([doc.page_content for doc in unique_docs])
+                # 🔥 Context
+                unique_docs = list({d.page_content: d for d in docs}.values())
+                context = "\n\n".join([d.page_content for d in unique_docs])
 
-                # 🔥 FINAL PROMPT
+                # 🔥 Prompt
                 prompt = f"""
-Analyze the resume context carefully.
-
-- Extract experience based on timeline
-- Combine multiple roles if needed
-- Answer clearly
+Analyze resume and answer clearly.
 
 Context:
 {context}
@@ -196,8 +172,30 @@ Question:
 {question}
 """
 
-                answer = query_llm(prompt)
+                # =========================
+                # LLM CALL
+                # =========================
+                if USE_LOCAL:
+                    from langchain_community.chat_models import ChatOllama
+
+                    llm = ChatOllama(model="llama3", temperature=0)
+                    response = llm.invoke(prompt)
+                    answer = response.content
+                else:
+                    answer = query_llm(prompt)
+
+                # 🔥 CITATIONS
+                sources = unique_docs[:3]
 
         st.markdown(answer)
+
+        # =========================
+        # SHOW CITATIONS
+        # =========================
+        if sources:
+            with st.expander("📄 Sources"):
+                for i, doc in enumerate(sources):
+                    st.markdown(f"**Source {i+1}:**")
+                    st.write(doc.page_content[:300])
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
