@@ -53,7 +53,7 @@ reranker = load_reranker()
 # =========================
 if not USE_LOCAL:
     genai.configure(api_key=st.secrets.get("API_KEY") or os.getenv("API_KEY"))
-    gemini_model = genai.GenerativeModel("gemini-2.5-flash")
+    gemini_model = genai.GenerativeModel("gemini-2-flash")
 
 # =========================
 # LOCAL SEARCH (UNCHANGED)
