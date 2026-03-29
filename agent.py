@@ -55,7 +55,7 @@ def load_llm():
         from langchain_google_genai import ChatGoogleGenerativeAI
         API_KEY = st.secrets.get("API_KEY") or os.getenv("API_KEY")
         return ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
+            model="gemini-2.5-flash",
             google_api_key=API_KEY,
             temperature=0.2,
             max_output_tokens=200
@@ -222,11 +222,29 @@ if question := st.chat_input("Ask your question..."):
                 {question}
                 """
 
-                try:
-                    response = llm.invoke(prompt)
-                    answer = response.content
-                except Exception as e:
-                    answer = f"Error: {str(e)}"
+                # =========================
+        # LLM CALL (FINAL FIX)
+        # =========================
+        st.info("🚀 Generating answer...")
+
+        answer = "⚠️ Failed to generate response. Please try again."
+
+        try:
+            # 🔥 LIMIT PROMPT SIZE
+            safe_prompt = prompt[:2000]
+
+            response = llm.invoke(
+                safe_prompt,
+                config={"timeout": 15}  # 🔥 HARD TIMEOUT
+            )
+
+            if response and hasattr(response, "content"):
+                answer = response.content
+            else:
+                answer = "⚠️ Empty response from AI."
+
+        except Exception as e:
+            answer = f"❌ Error: {str(e)}"
 
         st.markdown(answer)
 
