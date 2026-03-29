@@ -61,7 +61,7 @@ def query_llm(prompt):
                 {"role": "system", "content": "Answer ONLY from the provided context."},
                 {"role": "user", "content": prompt}
             ],
-            model="llama3-70b-8192",
+            model="llama3-8b-8192",   # ✅ FIXED
             temperature=0.2,
         )
 
