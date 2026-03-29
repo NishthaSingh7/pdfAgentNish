@@ -221,8 +221,8 @@ if question := st.chat_input("Ask your question..."):
                     answer = "Upload PDF first."
                 else:
                     retriever = st.session_state.vector_store.as_retriever(
-                        search_kwargs={"k": 6}
-                        chunk_size = 1000
+                        search_kwargs={"k": 6},
+                        chunk_size = 1000,
                         chunk_overlap = 200
                     )
                     docs = retriever.invoke(question)
