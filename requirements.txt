@@ -1,12 +1,8 @@
-streamlit==1.32.2
-langchain==0.1.16
-langchain-community==0.0.32
-langchain-google-genai==0.0.6
-chromadb==0.4.24
-pypdf==4.2.0
-python-dotenv==1.0.1
-ddgs
+streamlit
+langchain
+langchain-community
 sentence-transformers
 rank-bm25
 numpy
-google-genai
+pypdf
+google-genai==0.3.0
