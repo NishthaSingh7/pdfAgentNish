@@ -1,7 +1,7 @@
 # =========================
 # CONFIG 🔥
 # =========================
-USE_LOCAL = False   # True → Ollama | False → HuggingFace
+USE_LOCAL = False   # True → Ollama | False → Groq
 
 # =========================
 # IMPORTS
@@ -10,7 +10,6 @@ import os
 import numpy as np
 import streamlit as st
 from dotenv import load_dotenv
-import requests
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -18,6 +17,8 @@ from langchain_community.vectorstores import Chroma
 
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
+
+from groq import Groq   # 🔥 NEW
 
 load_dotenv()
 
@@ -48,49 +49,26 @@ embedding_model = load_embedding()
 reranker = load_reranker()
 
 # =========================
-# HF API CONFIG 🔥
+# GROQ CLIENT 🔥
 # =========================
-HF_API_URL = "https://router.huggingface.co/hf-inference/models/google/flan-t5-base"
-HF_HEADERS = {
-    "Authorization": f"Bearer {st.secrets.get('HF_TOKEN')}",
-    "Content-Type": "application/json"
-}
-def query_hf(prompt):
+if not USE_LOCAL:
+    client = Groq(api_key=st.secrets.get("GROQ_API_KEY"))
+
+def query_llm(prompt):
     try:
-        response = requests.post(
-            HF_API_URL,
-            headers=HF_HEADERS,
-            json={
-                "inputs": prompt,
-                "parameters": {
-                    "max_new_tokens": 150,
-                    "return_full_text": False
-                }
-            },
-            timeout=30
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": "Answer ONLY from the provided context."},
+                {"role": "user", "content": prompt}
+            ],
+            model="llama3-70b-8192",
+            temperature=0.2,
         )
 
-        # 🔥 HANDLE HTTP ERROR
-        if response.status_code != 200:
-            return f"❌ HTTP {response.status_code}: {response.text}"
-
-        data = response.json()
-        print("HF RESPONSE:", data)
-
-        # ✅ SUCCESS
-        if isinstance(data, list) and "generated_text" in data[0]:
-            return data[0]["generated_text"]
-
-        # ⚠️ MODEL LOADING / ERROR
-        if isinstance(data, dict) and "error" in data:
-            if "loading" in data["error"].lower():
-                return "⏳ Model loading... try again in 5–10 sec"
-            return f"⚠️ {data['error']}"
-
-        return "⚠️ Unexpected response format"
+        return chat_completion.choices[0].message.content
 
     except Exception as e:
-        return f"❌ Exception: {str(e)}"
+        return f"❌ Groq Error: {str(e)}"
 
 # =========================
 # LOCAL SEARCH
@@ -120,7 +98,7 @@ def rerank(query, docs, top_n=2):
 with st.sidebar:
     st.title("⚙️ Controls")
 
-    mode = "🟢 Local (Ollama)" if USE_LOCAL else "☁️ Cloud (HF)"
+    mode = "🟢 Local (Ollama)" if USE_LOCAL else "☁️ Cloud (Groq)"
     st.markdown(f"### Mode: {mode}")
 
     if st.button("Reset Chat"):
@@ -202,6 +180,9 @@ if question := st.chat_input("Ask your question..."):
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
 
+            # =========================
+            # LOCAL MODE
+            # =========================
             if USE_LOCAL:
                 if st.session_state.index is None:
                     answer = "Upload PDF first."
@@ -218,6 +199,9 @@ if question := st.chat_input("Ask your question..."):
                     response = llm.invoke(f"Context:\n{context}\n\nQ: {question}")
                     answer = response.content
 
+            # =========================
+            # CLOUD MODE (GROQ)
+            # =========================
             else:
                 if st.session_state.vector_store is None:
                     answer = "Upload PDF first."
@@ -239,7 +223,7 @@ Question:
 {question}
 """
 
-                    answer = query_hf(prompt)
+                    answer = query_llm(prompt)
 
         st.markdown(answer)
 

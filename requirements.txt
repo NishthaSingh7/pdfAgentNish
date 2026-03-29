@@ -7,3 +7,4 @@ pypdf
 numpy==1.26.4
 chromadb==0.4.24
 google-genai==0.3.0
+groq
