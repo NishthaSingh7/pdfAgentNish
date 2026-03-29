@@ -64,6 +64,40 @@ def query_hf(prompt):
             timeout=30
         )
 
+        # 🔥 FIRST CHECK RAW TEXT
+        if response.status_code != 200:
+            return f"❌ HTTP Error {response.status_code}: {response.text}"
+
+        if not response.text.strip():
+            return "⚠️ Empty response from HF API. Try again."
+
+        data = response.json()
+
+        print("HF RESPONSE:", data)
+
+        # ✅ NORMAL RESPONSE
+        if isinstance(data, list) and "generated_text" in data[0]:
+            return data[0]["generated_text"]
+
+        # ⚠️ ERROR CASE
+        if isinstance(data, dict):
+            if "error" in data:
+                if "loading" in data["error"].lower():
+                    return "⏳ Model loading... try again in few seconds"
+                return f"⚠️ {data['error']}"
+
+        return "⚠️ Unexpected HF response"
+
+    except Exception as e:
+        return f"❌ Exception: {str(e)}"
+    try:
+        response = requests.post(
+            HF_API_URL,
+            headers=HF_HEADERS,
+            json={"inputs": prompt},
+            timeout=30
+        )
+
         data = response.json()
         print("HF RESPONSE:", data)
 
