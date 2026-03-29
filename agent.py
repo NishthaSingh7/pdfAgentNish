@@ -19,6 +19,48 @@ load_dotenv()
 # =========================
 st.set_page_config(page_title="AI Resume Assistant", page_icon="🤖", layout="wide")
 
+st.markdown("""
+<style>
+/* Background */
+.main {
+    background: linear-gradient(135deg, #0f172a, #1e293b);
+    color: white;
+}
+
+/* Chat bubbles */
+.stChatMessage {
+    border-radius: 15px;
+    padding: 10px;
+    margin-bottom: 10px;
+}
+
+/* User bubble */
+[data-testid="stChatMessageContent"][aria-label="user"] {
+    background: #2563eb;
+    color: white;
+    border-radius: 12px;
+    padding: 10px;
+}
+
+/* Bot bubble */
+[data-testid="stChatMessageContent"][aria-label="assistant"] {
+    background: #111827;
+    color: #e5e7eb;
+    border-radius: 12px;
+    padding: 10px;
+}
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+    background: #020617;
+}
+
+/* Buttons */
+button {
+    border-radius: 10px !important;
+}
+</style>
+""", unsafe_allow_html=True)
 # =========================
 # SESSION STATE
 # =========================
@@ -117,9 +159,14 @@ for msg in st.session_state.messages:
 # =========================
 if question := st.chat_input("Ask about resume..."):
 
+    # 👉 Show USER message immediately
+    with st.chat_message("user", avatar="👤"):
+        st.markdown(question)
+
     st.session_state.messages.append({"role": "user", "content": question})
 
-    with st.chat_message("assistant"):
+    # 👉 THEN assistant
+    with st.chat_message("assistant", avatar="🤖"):
         with st.spinner("Thinking..."):
 
             if st.session_state.vector_store is None:
