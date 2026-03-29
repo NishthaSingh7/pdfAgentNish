@@ -9,3 +9,4 @@ ddgs
 sentence-transformers
 rank-bm25
 numpy
+google-genai
