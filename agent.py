@@ -50,12 +50,46 @@ reranker = load_reranker()
 # =========================
 # HF API CONFIG 🔥
 # =========================
-HF_API_URL = "https://router.huggingface.co/hf-inference/models/google/flan-t5-large"
+HF_API_URL = "https://router.huggingface.co/hf-inference/models/microsoft/Phi-3-mini-4k-instruct",
 HF_HEADERS = {
     "Authorization": f"Bearer {st.secrets.get('HF_TOKEN')}",
     "Content-Type": "application/json"
 }
 def query_hf(prompt):
+    try:
+        response = requests.post(
+            HF_API_URL,
+            headers=HF_HEADERS,
+            json={
+                "inputs": prompt,
+                "parameters": {
+                    "max_new_tokens": 200,
+                    "return_full_text": False
+                }
+            },
+            timeout=30
+        )
+
+        if response.status_code != 200:
+            return f"❌ HTTP {response.status_code}: {response.text}"
+
+        data = response.json()
+        print("HF RESPONSE:", data)
+
+        # ✅ SUCCESS CASE
+        if isinstance(data, list) and "generated_text" in data[0]:
+            return data[0]["generated_text"]
+
+        # ⚠️ ERROR CASE
+        if isinstance(data, dict) and "error" in data:
+            if "loading" in data["error"].lower():
+                return "⏳ Model loading... try again"
+            return f"⚠️ {data['error']}"
+
+        return "⚠️ Unexpected response"
+
+    except Exception as e:
+        return f"❌ Exception: {str(e)}"
     try:
         response = requests.post(
             HF_API_URL,
