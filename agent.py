@@ -62,7 +62,7 @@ def query_llm(prompt):
                 {"role": "user", "content": prompt}
             ],
             model="llama-3.1-8b-instant",   # ✅ FINAL WORKING MODEL
-            temperature=0.2,
+            temperature=0.3,
         )
 
         return chat_completion.choices[0].message.content
@@ -206,11 +206,11 @@ if question := st.chat_input("Ask your question..."):
                     answer = "Upload PDF first."
                 else:
                     retriever = st.session_state.vector_store.as_retriever(
-                        search_kwargs={"k": 1}
+                        search_kwargs={"k": 3}
                     )
                     docs = retriever.invoke(question)
 
-                    context = "\n\n".join([doc.page_content[:150] for doc in docs])
+                    context = "\n\n".join([doc.page_content for doc in docs])
 
                     prompt = f"""
 Answer ONLY from the context.
