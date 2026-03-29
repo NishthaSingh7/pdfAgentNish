@@ -1,7 +1,7 @@
 # =========================
 # CONFIG 🔥
 # =========================
-USE_LOCAL = False   # True → Advanced | False → Simple (deploy)
+USE_LOCAL = False   # True → Advanced (Ollama) | False → Simple (Gemini)
 
 # =========================
 # IMPORTS
@@ -18,6 +18,8 @@ from langchain_community.vectorstores import Chroma
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
 
+import google.generativeai as genai
+
 load_dotenv()
 
 # =========================
@@ -28,43 +30,12 @@ st.set_page_config(page_title="AI PDF Assistant", page_icon="🤖", layout="wide
 # =========================
 # SESSION STATE
 # =========================
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-if "documents" not in st.session_state:
-    st.session_state.documents = None
-
-if "index" not in st.session_state:
-    st.session_state.index = None
-
-if "vector_store" not in st.session_state:
-    st.session_state.vector_store = None
-
-if "bm25" not in st.session_state:
-    st.session_state.bm25 = None
+for key in ["messages", "documents", "index", "vector_store", "bm25"]:
+    if key not in st.session_state:
+        st.session_state[key] = None if key != "messages" else []
 
 # =========================
-# LLM
-# =========================
-@st.cache_resource
-def load_llm():
-    if USE_LOCAL:
-        from langchain_community.chat_models import ChatOllama
-        return ChatOllama(model="llama3", temperature=0)
-    else:
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        API_KEY = st.secrets.get("API_KEY") or os.getenv("API_KEY")
-        return ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            google_api_key=API_KEY,
-            temperature=0.2,
-            max_output_tokens=200
-        )
-
-llm = load_llm()
-
-# =========================
-# MODELS (LOCAL ONLY)
+# LOCAL MODELS (UNCHANGED)
 # =========================
 @st.cache_resource
 def load_embedding():
@@ -78,7 +49,14 @@ embedding_model = load_embedding()
 reranker = load_reranker()
 
 # =========================
-# LOCAL SEARCH
+# GEMINI CONFIG (SIMPLE 🔥)
+# =========================
+if not USE_LOCAL:
+    genai.configure(api_key=st.secrets.get("API_KEY") or os.getenv("API_KEY"))
+    gemini_model = genai.GenerativeModel("gemini-1.5-flash")
+
+# =========================
+# LOCAL SEARCH (UNCHANGED)
 # =========================
 def vector_search(query, k=5):
     query_vec = embedding_model.encode([query])
@@ -87,13 +65,10 @@ def vector_search(query, k=5):
 
 def hybrid_search(query):
     vector_docs = vector_search(query, k=5)
-
     tokenized = query.lower().split()
     scores = st.session_state.bm25.get_scores(tokenized)
     top_idx = np.argsort(scores)[-5:]
-
     bm25_docs = [st.session_state.documents[i] for i in top_idx]
-
     return vector_docs + bm25_docs
 
 def rerank(query, docs, top_n=2):
@@ -108,7 +83,7 @@ def rerank(query, docs, top_n=2):
 with st.sidebar:
     st.title("⚙️ Controls")
 
-    mode = "🟢 Advanced (Local)" if USE_LOCAL else "☁️ Simple (Cloud)"
+    mode = "🟢 Advanced (Local)" if USE_LOCAL else "☁️ Simple (Gemini)"
     st.markdown(f"### Mode: {mode}")
 
     if st.button("Reset Chat"):
@@ -141,7 +116,6 @@ with st.sidebar:
 
             if USE_LOCAL:
                 import faiss
-
                 embeddings = embedding_model.encode(texts)
                 dim = embeddings.shape[1]
 
@@ -166,7 +140,7 @@ with st.sidebar:
                     hf_embed
                 )
 
-        st.success("PDF Ready!")
+        st.success("✅ PDF Ready!")
 
 # =========================
 # UI
@@ -179,7 +153,7 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 # =========================
-# CHAT LOGIC
+# CHAT
 # =========================
 if question := st.chat_input("Ask your question..."):
 
@@ -199,52 +173,61 @@ if question := st.chat_input("Ask your question..."):
                     docs = list({d.page_content: d for d in docs}.values())
                     docs = rerank(question, docs)
 
+                    context = "\n\n".join([doc.page_content[:200] for doc in docs])
+
+                    prompt = f"""
+                    Answer based only on the context.
+
+                    Context:
+                    {context}
+
+                    Question:
+                    {question}
+                    """
+
+                    from langchain_community.chat_models import ChatOllama
+                    llm = ChatOllama(model="llama3", temperature=0)
+
+                    response = llm.invoke(prompt)
+                    answer = response.content
+
             else:
                 if st.session_state.vector_store is None:
                     answer = "Upload PDF first."
-                    docs = []
                 else:
                     retriever = st.session_state.vector_store.as_retriever(
-                        search_kwargs={"k": 2}
+                        search_kwargs={"k": 1}
                     )
                     docs = retriever.invoke(question)
 
-            if 'docs' in locals() and docs:
-                context = "\n\n".join([doc.page_content[:200] for doc in docs])
+                    context = "\n\n".join([doc.page_content[:150] for doc in docs])
 
-                prompt = f"""
-                Answer ONLY using the context.
+                    # 🔥 CLEAN PROMPT (VERY IMPORTANT)
+                    prompt = f"""
+You are a strict AI assistant.
 
-                Context:
-                {context}
+Answer ONLY from the given context.
+If answer is not present, say: "Not found in document."
 
-                Question:
-                {question}
-                """
+Keep answer concise and clear.
 
-                # =========================
-        # LLM CALL (FINAL FIX)
-        # =========================
-        st.info("🚀 Generating answer...")
+Context:
+{context}
 
-        answer = "⚠️ Failed to generate response. Please try again."
+Question:
+{question}
+"""
 
-        try:
-            # 🔥 LIMIT PROMPT SIZE
-            safe_prompt = prompt[:2000]
+                    try:
+                        response = gemini_model.generate_content(prompt)
 
-            response = llm.invoke(
-                safe_prompt,
-                config={"timeout": 15}  # 🔥 HARD TIMEOUT
-            )
+                        if response and response.text:
+                            answer = response.text
+                        else:
+                            answer = "⚠️ No response from AI."
 
-            if response and hasattr(response, "content"):
-                answer = response.content
-            else:
-                answer = "⚠️ Empty response from AI."
-
-        except Exception as e:
-            answer = f"❌ Error: {str(e)}"
+                    except Exception as e:
+                        answer = f"❌ Error: {str(e)}"
 
         st.markdown(answer)
 
