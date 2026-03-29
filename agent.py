@@ -58,11 +58,26 @@ def query_llm(prompt):
     try:
         chat_completion = client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "Answer ONLY from the provided context."},
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system",
+                    "content": """
+You are an expert AI resume assistant.
+
+Guidelines:
+- Answer using ONLY the provided context.
+- If exact information is not present, infer logically from available details.
+- If something is ongoing, assume it applies to recent years.
+- Avoid saying "no information" unless absolutely nothing is relevant.
+- Be concise, clear, and confident.
+"""
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
             ],
-            model="llama-3.1-8b-instant",   # ✅ FINAL WORKING MODEL
-            temperature=0.3,
+            model="llama-3.1-8b-instant",
+            temperature=0.2,
         )
 
         return chat_completion.choices[0].message.content
@@ -213,11 +228,13 @@ if question := st.chat_input("Ask your question..."):
                     context = "\n\n".join([doc.page_content for doc in docs])
 
                     prompt = f"""
-You are a strict AI assistant.
+You are an expert resume analyst.
 
-Answer ONLY using the given context.
-If answer is partially available, answer as much as possible.
-DO NOT say "no information" unless absolutely nothing is relevant.
+Instructions:
+- Use the context strictly but allow logical inference.
+- If the question refers to a year not explicitly mentioned, map it to the closest timeline.
+- Ongoing roles or programs should be considered active in recent years.
+- Never say "no information" if partial or inferred answer is possible.
 
 Context:
 {context}
