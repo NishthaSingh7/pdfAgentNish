@@ -1,7 +1,7 @@
 # =========================
 # CONFIG 🔥
 # =========================
-USE_LOCAL = False   # True → Ollama | False → Gemini
+USE_LOCAL = False   # True → Ollama | False → HuggingFace
 
 # =========================
 # IMPORTS
@@ -10,6 +10,7 @@ import os
 import numpy as np
 import streamlit as st
 from dotenv import load_dotenv
+import requests
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -17,9 +18,6 @@ from langchain_community.vectorstores import Chroma
 
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
-
-# ✅ NEW GEMINI SDK
-from google import genai
 
 load_dotenv()
 
@@ -36,7 +34,7 @@ for key in ["messages", "documents", "index", "vector_store", "bm25"]:
         st.session_state[key] = None if key != "messages" else []
 
 # =========================
-# LOCAL MODELS (UNCHANGED)
+# LOCAL MODELS
 # =========================
 @st.cache_resource
 def load_embedding():
@@ -50,15 +48,27 @@ embedding_model = load_embedding()
 reranker = load_reranker()
 
 # =========================
-# GEMINI CLIENT (FIXED 🔥)
+# HF API CONFIG 🔥
 # =========================
-if not USE_LOCAL:
-    client = genai.Client(
-        api_key=st.secrets.get("API_KEY") or os.getenv("API_KEY")
+HF_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
+HF_HEADERS = {
+    "Authorization": f"Bearer {st.secrets.get('HF_TOKEN') or os.getenv('HF_TOKEN')}"
+}
+
+def query_hf(prompt):
+    response = requests.post(
+        HF_API_URL,
+        headers=HF_HEADERS,
+        json={"inputs": prompt}
     )
+    result = response.json()
+
+    if isinstance(result, list):
+        return result[0]["generated_text"]
+    return "⚠️ Error from HF API"
 
 # =========================
-# LOCAL SEARCH (UNCHANGED)
+# LOCAL SEARCH
 # =========================
 def vector_search(query, k=5):
     query_vec = embedding_model.encode([query])
@@ -85,7 +95,7 @@ def rerank(query, docs, top_n=2):
 with st.sidebar:
     st.title("⚙️ Controls")
 
-    mode = "🟢 Advanced (Local)" if USE_LOCAL else "☁️ Simple (Gemini)"
+    mode = "🟢 Advanced (Local)" if USE_LOCAL else "☁️ Simple (HF API)"
     st.markdown(f"### Mode: {mode}")
 
     if st.button("Reset Chat"):
@@ -167,9 +177,6 @@ if question := st.chat_input("Ask your question..."):
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
 
-            # =========================
-            # LOCAL (UNCHANGED)
-            # =========================
             if USE_LOCAL:
                 if st.session_state.index is None:
                     answer = "Upload PDF first."
@@ -196,9 +203,6 @@ Question:
                     response = llm.invoke(prompt)
                     answer = response.content
 
-            # =========================
-            # CLOUD (FIXED GEMINI 🔥)
-            # =========================
             else:
                 if st.session_state.vector_store is None:
                     answer = "Upload PDF first."
@@ -211,12 +215,7 @@ Question:
                     context = "\n\n".join([doc.page_content[:150] for doc in docs])
 
                     prompt = f"""
-You are a strict AI assistant.
-
-Answer ONLY from the given context.
-If answer is not present, say: "Not found in document."
-
-Keep answer concise.
+Answer ONLY from the context.
 
 Context:
 {context}
@@ -225,16 +224,7 @@ Question:
 {question}
 """
 
-                    try:
-                        response = client.models.generate_content(
-                            model="gemini-1.5-flash-001",
-                            contents=prompt
-                        )
-
-                        answer = response.text if response.text else "⚠️ No response."
-
-                    except Exception as e:
-                        answer = f"❌ Error: {str(e)}"
+                    answer = query_hf(prompt)
 
         st.markdown(answer)
 
