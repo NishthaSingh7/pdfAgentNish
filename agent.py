@@ -50,8 +50,7 @@ reranker = load_reranker()
 # =========================
 # HF API CONFIG 🔥
 # =========================
-HF_API_URL = "https://router.huggingface.co/hf-inference/models/microsoft/Phi-3-mini-4k-instruct"
-
+HF_API_URL = "https://router.huggingface.co/hf-inference/models/google/flan-t5-base"
 HF_HEADERS = {
     "Authorization": f"Bearer {st.secrets.get('HF_TOKEN')}",
     "Content-Type": "application/json"
@@ -64,91 +63,35 @@ def query_hf(prompt):
             json={
                 "inputs": prompt,
                 "parameters": {
-                    "max_new_tokens": 200,
+                    "max_new_tokens": 150,
                     "return_full_text": False
                 }
             },
             timeout=30
         )
 
+        # 🔥 HANDLE HTTP ERROR
         if response.status_code != 200:
             return f"❌ HTTP {response.status_code}: {response.text}"
 
         data = response.json()
         print("HF RESPONSE:", data)
 
-        # ✅ SUCCESS CASE
+        # ✅ SUCCESS
         if isinstance(data, list) and "generated_text" in data[0]:
             return data[0]["generated_text"]
 
-        # ⚠️ ERROR CASE
+        # ⚠️ MODEL LOADING / ERROR
         if isinstance(data, dict) and "error" in data:
             if "loading" in data["error"].lower():
-                return "⏳ Model loading... try again"
+                return "⏳ Model loading... try again in 5–10 sec"
             return f"⚠️ {data['error']}"
 
-        return "⚠️ Unexpected response"
+        return "⚠️ Unexpected response format"
 
     except Exception as e:
         return f"❌ Exception: {str(e)}"
-    try:
-        response = requests.post(
-            HF_API_URL,
-            headers=HF_HEADERS,
-            json={"inputs": prompt},
-            timeout=30
-        )
 
-        # 🔥 FIRST CHECK RAW TEXT
-        if response.status_code != 200:
-            return f"❌ HTTP Error {response.status_code}: {response.text}"
-
-        if not response.text.strip():
-            return "⚠️ Empty response from HF API. Try again."
-
-        data = response.json()
-
-        print("HF RESPONSE:", data)
-
-        # ✅ NORMAL RESPONSE
-        if isinstance(data, list) and "generated_text" in data[0]:
-            return data[0]["generated_text"]
-
-        # ⚠️ ERROR CASE
-        if isinstance(data, dict):
-            if "error" in data:
-                if "loading" in data["error"].lower():
-                    return "⏳ Model loading... try again in few seconds"
-                return f"⚠️ {data['error']}"
-
-        return "⚠️ Unexpected HF response"
-
-    except Exception as e:
-        return f"❌ Exception: {str(e)}"
-    try:
-        response = requests.post(
-            HF_API_URL,
-            headers=HF_HEADERS,
-            json={"inputs": prompt},
-            timeout=30
-        )
-
-        data = response.json()
-        print("HF RESPONSE:", data)
-
-        if isinstance(data, list) and "generated_text" in data[0]:
-            return data[0]["generated_text"]
-
-        if isinstance(data, dict):
-            if "error" in data:
-                if "loading" in data["error"].lower():
-                    return "⏳ Model loading... try again in 10 sec"
-                return f"⚠️ {data['error']}"
-
-        return "⚠️ Unexpected response"
-
-    except Exception as e:
-        return f"❌ Error: {str(e)}"
 # =========================
 # LOCAL SEARCH
 # =========================
