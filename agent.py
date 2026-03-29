@@ -124,7 +124,7 @@ with st.sidebar:
                 chunk_size=700,
                 chunk_overlap=150
             )
-            docs = splitter.split_documents(documents)[:15]
+            docs = splitter.split_documents(documents)[:40]
 
             texts = [doc.page_content for doc in docs]
 
@@ -213,7 +213,11 @@ if question := st.chat_input("Ask your question..."):
                     context = "\n\n".join([doc.page_content for doc in docs])
 
                     prompt = f"""
-Answer ONLY from the context.
+You are a strict AI assistant.
+
+Answer ONLY using the given context.
+If answer is partially available, answer as much as possible.
+DO NOT say "no information" unless absolutely nothing is relevant.
 
 Context:
 {context}
