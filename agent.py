@@ -50,7 +50,8 @@ reranker = load_reranker()
 # =========================
 # HF API CONFIG 🔥
 # =========================
-HF_API_URL = "https://router.huggingface.co/hf-inference/models/microsoft/Phi-3-mini-4k-instruct",
+HF_API_URL = "https://router.huggingface.co/hf-inference/models/microsoft/Phi-3-mini-4k-instruct"
+
 HF_HEADERS = {
     "Authorization": f"Bearer {st.secrets.get('HF_TOKEN')}",
     "Content-Type": "application/json"
