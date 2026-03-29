@@ -221,26 +221,29 @@ if question := st.chat_input("Ask your question..."):
                     answer = "Upload PDF first."
                 else:
                     retriever = st.session_state.vector_store.as_retriever(
-                        search_kwargs={"k": 3}
+                        search_kwargs={"k": 6}
+                        chunk_size = 1000
+                        chunk_overlap = 200
                     )
                     docs = retriever.invoke(question)
 
-                    context = "\n\n".join([doc.page_content for doc in docs])
-
+                    unique_docs = list({doc.page_content: doc for doc in docs}.values())
+                    context = "\n\n".join([doc.page_content for doc in unique_docs])
                     prompt = f"""
 You are an expert resume analyst.
 
 Instructions:
-- Use the context strictly but allow logical inference.
-- If the question refers to a year not explicitly mentioned, map it to the closest timeline.
-- Ongoing roles or programs should be considered active in recent years.
-- Never say "no information" if partial or inferred answer is possible.
+- Carefully analyze the timeline of experience.
+- Combine information across multiple sections if needed.
+- Infer answers when exact year is not explicitly mentioned.
+- Do NOT say "no information" if relevant experience exists.
 
 Context:
 {context}
 
 Question:
 {question}
+Answer clearly and confidently:
 """
 
                     answer = query_llm(prompt)
