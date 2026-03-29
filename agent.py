@@ -143,7 +143,14 @@ You are an expert resume analyst.
 # =========================
 # UI HEADER
 # =========================
-st.title("🤖 AI Resume Assistant")
+st.markdown("""
+<h1 style='text-align: center; color: #38bdf8;'>
+🤖 AI Resume Assistant
+</h1>
+<p style='text-align: center; color: gray;'>
+Ask anything about your resume • Powered by GenAI 🚀
+</p>
+""", unsafe_allow_html=True)
 st.caption("Ask anything about the uploaded resume — powered by RAG + LLM")
 
 # =========================
@@ -157,7 +164,7 @@ for msg in st.session_state.messages:
 # =========================
 # CHAT INPUT
 # =========================
-if question := st.chat_input("Ask about resume..."):
+if question := st.chat_input("💬 Ask anything about experience, skills, projects..."):
 
     # 👉 Show USER message immediately
     with st.chat_message("user", avatar="👤"):
