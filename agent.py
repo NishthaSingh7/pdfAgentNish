@@ -50,22 +50,38 @@ reranker = load_reranker()
 # =========================
 # HF API CONFIG 🔥
 # =========================
-HF_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
+HF_API_URL = "https://api-inference.huggingface.co/models/google/flan-t5-large"
+
 HF_HEADERS = {
-    "Authorization": f"Bearer {st.secrets.get('HF_TOKEN') or os.getenv('HF_TOKEN')}"
+    "Authorization": f"Bearer {st.secrets.get('HF_TOKEN')}"
 }
 
 def query_hf(prompt):
-    response = requests.post(
-        HF_API_URL,
-        headers=HF_HEADERS,
-        json={"inputs": prompt}
-    )
-    result = response.json()
+    try:
+        response = requests.post(
+            HF_API_URL,
+            headers=HF_HEADERS,
+            json={"inputs": prompt},
+            timeout=30
+        )
 
-    if isinstance(result, list):
-        return result[0]["generated_text"]
-    return "⚠️ Error from HF API"
+        data = response.json()
+
+        # DEBUG
+        print("HF RESPONSE:", data)
+
+        if isinstance(data, list) and "generated_text" in data[0]:
+            return data[0]["generated_text"]
+
+        if isinstance(data, dict) and "error" in data:
+            if "loading" in data["error"].lower():
+                return "⏳ Model loading... try again in 10 seconds."
+            return f"⚠️ {data['error']}"
+
+        return "⚠️ Unexpected response."
+
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
 
 # =========================
 # LOCAL SEARCH
@@ -95,7 +111,7 @@ def rerank(query, docs, top_n=2):
 with st.sidebar:
     st.title("⚙️ Controls")
 
-    mode = "🟢 Advanced (Local)" if USE_LOCAL else "☁️ Simple (HF API)"
+    mode = "🟢 Local (Ollama)" if USE_LOCAL else "☁️ Cloud (HF)"
     st.markdown(f"### Mode: {mode}")
 
     if st.button("Reset Chat"):
@@ -187,20 +203,10 @@ if question := st.chat_input("Ask your question..."):
 
                     context = "\n\n".join([doc.page_content[:200] for doc in docs])
 
-                    prompt = f"""
-Answer based only on the context.
-
-Context:
-{context}
-
-Question:
-{question}
-"""
-
                     from langchain_community.chat_models import ChatOllama
                     llm = ChatOllama(model="llama3", temperature=0)
 
-                    response = llm.invoke(prompt)
+                    response = llm.invoke(f"Context:\n{context}\n\nQ: {question}")
                     answer = response.content
 
             else:
