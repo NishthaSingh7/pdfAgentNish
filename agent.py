@@ -10,7 +10,11 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
-from groq import Groq
+# Safe Groq import
+try:
+    from groq import Groq
+except:
+    Groq = None
 
 load_dotenv()
 
@@ -19,46 +23,99 @@ load_dotenv()
 # =========================
 st.set_page_config(page_title="AI Resume Assistant", page_icon="🤖", layout="wide")
 
+# =========================
+# 🔥 MODERN UI CSS (WORKING)
+# =========================
 st.markdown("""
 <style>
-/* Background */
-.main {
-    background: linear-gradient(135deg, #0f172a, #1e293b);
+
+/* ================= LIGHT MODE ================= */
+[data-theme="light"] .stApp {
+    background-color: #F8F8E1;
+    color: #1e293b;
+}
+
+[data-theme="light"] section[data-testid="stSidebar"] {
+    background-color: #FF90BB;
     color: white;
 }
 
-/* Chat bubbles */
-.stChatMessage {
-    border-radius: 15px;
-    padding: 10px;
-    margin-bottom: 10px;
-}
-
-/* User bubble */
-[data-testid="stChatMessageContent"][aria-label="user"] {
-    background: #2563eb;
+/* User */
+[data-theme="light"] [data-testid="stChatMessage"]:nth-child(even) {
+    background-color: #FF90BB;
     color: white;
-    border-radius: 12px;
-    padding: 10px;
+    border-left: 4px solid #8ACCD5;
 }
 
-/* Bot bubble */
-[data-testid="stChatMessageContent"][aria-label="assistant"] {
-    background: #111827;
-    color: #e5e7eb;
-    border-radius: 12px;
-    padding: 10px;
+/* Bot */
+[data-theme="light"] [data-testid="stChatMessage"]:nth-child(odd) {
+    background-color: #FFC1DA;
+    color: #1e293b;
+    border-left: 4px solid #FF90BB;
 }
 
-/* Sidebar */
-section[data-testid="stSidebar"] {
-    background: #020617;
+/* ================= DARK MODE ================= */
+[data-theme="dark"] .stApp {
+    background-color: #020617;
+    color: #e2e8f0;
+}
+
+[data-theme="dark"] section[data-testid="stSidebar"] {
+    background-color: #BE5985;
+    color: white;
+}
+
+/* User */
+[data-theme="dark"] [data-testid="stChatMessage"]:nth-child(even) {
+    background-color: #FF90BB;
+    color: black;
+    border-left: 4px solid #8ACCD5;
+}
+
+/* Bot */
+[data-theme="dark"] [data-testid="stChatMessage"]:nth-child(odd) {
+    background-color: #1e293b;
+    color: #e2e8f0;
+    border-left: 4px solid #FF90BB;
+}
+
+/* ================= COMMON ================= */
+[data-testid="stChatMessage"] {
+    border-radius: 16px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+/* Input */
+textarea {
+        padding: 12px !important;
+    border-radius: 14px !important;
+    border: 2px solid #8ACCD5 !important;
 }
 
 /* Buttons */
 button {
+    background-color: #8ACCD5 !important;
+    color: #1e293b !important;
     border-radius: 10px !important;
 }
+
+button:hover {
+    background-color: #FF90BB !important;
+    color: white !important;
+}
+
+/* Header */
+h1 {
+    color: #FF90BB;
+}
+
+/* Expander */
+details {
+    border-radius: 10px;
+    padding: 10px;
+}
+
 </style>
 """, unsafe_allow_html=True)
 # =========================
@@ -76,9 +133,9 @@ if "vector_store" not in st.session_state:
 with st.sidebar:
     st.title("⚙️ Controls")
 
-    USE_LOCAL = st.toggle("🟢 Use Local LLM (Ollama)", value=False)
+    USE_LOCAL = st.toggle("📍 Use Local LLM (Ollama)", value=False)
 
-    mode = "🟢 Local (Ollama)" if USE_LOCAL else "☁️ Cloud (Groq)"
+    mode = "🏠︎ Local (Ollama)" if USE_LOCAL else "☁️ Cloud (Groq)"
     st.markdown(f"### Mode: {mode}")
 
     st.divider()
@@ -112,10 +169,14 @@ with st.sidebar:
 # =========================
 # GROQ SETUP
 # =========================
-if not USE_LOCAL:
+client = None
+if Groq and not USE_LOCAL:
     client = Groq(api_key=st.secrets.get("GROQ_API_KEY"))
 
 def query_llm(prompt):
+    if client is None:
+        return "⚠️ Groq not available."
+
     try:
         response = client.chat.completions.create(
             messages=[
@@ -123,10 +184,7 @@ def query_llm(prompt):
                     "role": "system",
                     "content": """
 You are an expert resume analyst.
-
-- Focus on experience and timeline
-- Combine multiple roles if needed
-- Answer clearly
+Focus on experience and timeline.
 """
                 },
                 {"role": "user", "content": prompt}
@@ -138,87 +196,73 @@ You are an expert resume analyst.
         return response.choices[0].message.content
 
     except Exception as e:
-        return f"❌ Groq Error: {str(e)}"
+        return f"❌ Error: {str(e)}"
 
 # =========================
-# UI HEADER
+# HEADER
 # =========================
 st.markdown("""
-<h1 style='text-align: center; color: #38bdf8;'>
+<h1 style='text-align:center; font-size:42px; color:#FF90BB;'>
 🤖 AI Resume Assistant
 </h1>
-<p style='text-align: center; color: gray;'>
-Ask anything about your resume • Powered by GenAI 🚀
+
+<p style='text-align:center; font-size:16px; color:#8ACCD5;'>
+Soft AI • Smart Insights • Beautiful UI 🌸
 </p>
 """, unsafe_allow_html=True)
-st.caption("Ask anything about the uploaded resume — powered by RAG + LLM")
 
 # =========================
 # DISPLAY CHAT
 # =========================
 for msg in st.session_state.messages:
-    avatar = "👤" if msg["role"] == "user" else "🤖"
-    with st.chat_message(msg["role"], avatar=avatar):
+    with st.chat_message(msg["role"], avatar="👤" if msg["role"]=="user" else "🤖"):
         st.markdown(msg["content"])
 
 # =========================
 # CHAT INPUT
 # =========================
-if question := st.chat_input("💬 Ask anything about experience, skills, projects..."):
+if question := st.chat_input(" 💬 Ask about experience, skills, projects..."):
 
-    # 👉 Show USER message immediately
+    # USER MESSAGE SHOW
     with st.chat_message("user", avatar="👤"):
         st.markdown(question)
 
     st.session_state.messages.append({"role": "user", "content": question})
 
-    # 👉 THEN assistant
+    # BOT RESPONSE
     with st.chat_message("assistant", avatar="🤖"):
         with st.spinner("Thinking..."):
 
             if st.session_state.vector_store is None:
-                answer = "⚠️ Please upload a PDF first."
+                answer = "⚠️ Upload a PDF first."
                 sources = []
             else:
                 retriever = st.session_state.vector_store.as_retriever(
                     search_kwargs={"k": 10}
                 )
 
-                # 🔥 Query Enhancement
                 enhanced_query = f"""
 {question}
-
-Focus on:
-- work experience
-- jobs
-- roles
-- timeline
-- years like 2023, 2024, 2025
+Focus on experience, roles, jobs, timeline, years.
 """
 
                 docs = retriever.invoke(enhanced_query)
 
-                # 🔥 Filter Relevant Chunks
+                # FILTER
                 filtered_docs = []
                 for doc in docs:
-                    text = doc.page_content.lower()
-                    if any(word in text for word in [
-                        "experience", "developer", "engineer",
-                        "worked", "training", "2023", "2024", "2025"
+                    if any(k in doc.page_content.lower() for k in [
+                        "experience","developer","engineer","2023","2024","2025"
                     ]):
                         filtered_docs.append(doc)
 
                 if filtered_docs:
                     docs = filtered_docs
 
-                # 🔥 Context
                 unique_docs = list({d.page_content: d for d in docs}.values())
                 context = "\n\n".join([d.page_content for d in unique_docs])
 
-                # 🔥 Prompt
                 prompt = f"""
-Analyze resume and answer clearly.
-
 Context:
 {context}
 
@@ -226,26 +270,18 @@ Question:
 {question}
 """
 
-                # =========================
-                # LLM CALL
-                # =========================
                 if USE_LOCAL:
                     from langchain_community.chat_models import ChatOllama
-
-                    llm = ChatOllama(model="llama3", temperature=0)
-                    response = llm.invoke(prompt)
-                    answer = response.content
+                    llm = ChatOllama(model="llama3")
+                    answer = llm.invoke(prompt).content
                 else:
                     answer = query_llm(prompt)
 
-                # 🔥 CITATIONS
                 sources = unique_docs[:3]
 
         st.markdown(answer)
 
-        # =========================
-        # SHOW CITATIONS
-        # =========================
+        # CITATIONS
         if sources:
             with st.expander("📄 Sources"):
                 for i, doc in enumerate(sources):
