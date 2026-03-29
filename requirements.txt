@@ -3,6 +3,6 @@ langchain
 langchain-community
 sentence-transformers
 rank-bm25
-numpy
+numpy==1.26.4
 pypdf
 google-genai==0.3.0
