@@ -50,12 +50,11 @@ reranker = load_reranker()
 # =========================
 # HF API CONFIG 🔥
 # =========================
-HF_API_URL = "https://api-inference.huggingface.co/models/google/flan-t5-large"
-
+HF_API_URL = "https://router.huggingface.co/hf-inference/models/google/flan-t5-large"
 HF_HEADERS = {
-    "Authorization": f"Bearer {st.secrets.get('HF_TOKEN')}"
+    "Authorization": f"Bearer {st.secrets.get('HF_TOKEN')}",
+    "Content-Type": "application/json"
 }
-
 def query_hf(prompt):
     try:
         response = requests.post(
@@ -66,23 +65,21 @@ def query_hf(prompt):
         )
 
         data = response.json()
-
-        # DEBUG
         print("HF RESPONSE:", data)
 
         if isinstance(data, list) and "generated_text" in data[0]:
             return data[0]["generated_text"]
 
-        if isinstance(data, dict) and "error" in data:
-            if "loading" in data["error"].lower():
-                return "⏳ Model loading... try again in 10 seconds."
-            return f"⚠️ {data['error']}"
+        if isinstance(data, dict):
+            if "error" in data:
+                if "loading" in data["error"].lower():
+                    return "⏳ Model loading... try again in 10 sec"
+                return f"⚠️ {data['error']}"
 
-        return "⚠️ Unexpected response."
+        return "⚠️ Unexpected response"
 
     except Exception as e:
         return f"❌ Error: {str(e)}"
-
 # =========================
 # LOCAL SEARCH
 # =========================
